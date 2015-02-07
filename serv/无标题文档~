@@ -1,0 +1,50 @@
+#include<stdio.h>
+#include<sys/types.h>
+#include<sys/stat.h>
+#include<fcntl.h>
+#include<stdlib.h>
+#include<sys/socket.h>
+#include<unistd.h>
+#include<netinet/in.h>
+#include<string.h>
+#include<arpa/inet.h>
+#include<errno.h>
+#include<time.h>
+
+
+void do_get(int connect_socket){
+	              //bzero(choice,sizeof(choice));
+        char buffer[BUFFER_SIZE];//recv接收到的数据保存在缓冲区buffer中,文件名
+        bzero(buffer,BUFFER_SIZE);
+        if(recv(connect_socket,buffer,BUFFER_SIZE,0)<0){
+                  my_err("recv",__LINE__);
+                  exit(1);
+        }
+                		
+        char file_name[FILE_NAME_MAXSIZE];//将buffer接收到的文件名转存到file_name中
+        bzero(file_name,FILE_NAME_MAXSIZE);
+        strncpy(file_name,buffer,strlen(buffer) > FILE_NAME_MAXSIZE ? FILE_NAME_MAXSIZE : strlen(buffer));
+                		
+        printf("\n %s \n",file_name);//输出客户端从服务器端下载的文件名
+                
+                		/* 打开文件并且读取数据 */
+        int fd;
+        if((fd=open(file_name,O_RDWR))==-1){//打开文件失败
+                 my_err("open",__LINE__);
+                 exit(1);
+        }else{ 								//打开文件成功
+                 bzero(buffer,BUFFER_SIZE);  //缓冲区清零
+                 int length=0;
+                 while((length=read(fd,buffer,BUFFER_SIZE))>0){//读取数据
+                           if(send(connect_socket,buffer,length,0)<0){//发送数据
+                                      my_err("send",__LINE__);
+                                       break;
+                           }
+                       bzero(buffer,BUFFER_SIZE);//每传输一次需要将buffer清零
+                 }
+                 close(fd);//文件传输完毕，关闭文件
+                 printf("Send file:%s successful!\n",file_name);
+        }
+                		
+                		
+}

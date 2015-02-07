@@ -1,0 +1,84 @@
+#include<stdio.h>
+#include<stdlib.h>
+#include<sys/types.h>
+#include<sys/stat.h>
+#include<fcntl.h>
+#include<stdlib.h>
+#include<sys/socket.h>
+#include<string.h>
+#include<netinet/in.h>
+#include<errno.h>
+#include<unistd.h>
+#include<arpa/inet.h>
+
+#define         FILE_NAME_MAXSIZE 200
+#define         CWDMAXSIZE      50//存放目录的最大容量
+
+void do_get(int connect_socket)
+{
+		
+      //输入文件名，并放入到缓冲区buffer中等待发送
+        char file_name[FILE_NAME_MAXSIZE];
+        bzero(file_name,FILE_NAME_MAXSIZE);//清零操作
+        printf("输入要下载的服务器端的文件名:");
+        scanf("%s",file_name);
+        
+        char pathname[40];
+        bzero(pathname,sizeof(pathname));
+        printf("输入文件要保存到的地方:");
+        scanf("%s",pathname);
+        
+		char buffer[BUFFER_SIZE];
+        bzero(buffer,FILE_NAME_MAXSIZE);        
+        strncpy(buffer,file_name,strlen(file_name)>BUFFER_SIZE ? BUFFER_SIZE : strlen(file_name));
+        	
+        //向服务器发送buffer中的数据,即文件名
+        if(send(connect_socket,buffer,BUFFER_SIZE,0)<0)
+        {
+                my_err("send file_name",__LINE__);
+                exit(1);
+        }
+	
+        char cwd[40];//存放当前目录
+        if(getcwd(cwd,CWDMAXSIZE)<0){
+                my_err("getcwd",__LINE__);
+                exit(1);
+        }
+
+	if((chdir(pathname))<0){//切换到写文件的目录下
+                my_err("chdir",__LINE__);
+                exit(1);
+        }
+        //打开文件，准备写入
+        int fd;
+        int fd1;
+        if(fd1=open(file_name,O_RDWR)>0)
+        {
+                printf("该文件已存在，不需要下载\n");
+                exit(1);
+        }
+        //if((fd=open(file_name,O_CREAT | O_EXCL,S_IRUSR | S_IWUSR))==-1){
+          if((fd=creat(file_name,S_IRWXU))==-1){
+                my_err("creat",__LINE__);
+               	exit(1);
+       	  }
+
+        //从服务器接受数据到buffer中，每接收一段数据，便将其写入文件中，循环直到文件接收完并写完为止
+        bzero(buffer,BUFFER_SIZE);
+        int length=0;
+       	while((length=recv(connect_socket,buffer,BUFFER_SIZE,0))>0){
+        			if((write(fd,buffer,length))<length){
+                    printf("File:\t%s write failed\n",file_name);
+                    break;
+                    }
+                bzero(buffer,BUFFER_SIZE);
+        }
+
+        //接收成功后，关闭文件，关闭socket
+        printf("Receeived file:%s from server IP successful!\n",file_name);
+        close(fd);
+        chdir(cwd);//返回到之前的工作目录
+        close(connect_socket);
+        //return 0;
+}
+

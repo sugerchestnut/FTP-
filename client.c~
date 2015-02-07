@@ -1,0 +1,131 @@
+/*
+ * =====================================================================================
+ *
+ *       Filename:  client.c
+ *
+ *    Description:  客户端的程序
+ *
+ *        Version:  1.0
+ *        Created:  2015年01月31日 14时12分12秒
+ *       Revision:  none
+ *       Compiler:  gcc
+ *
+ *         Author:  潘璐 (fgm), mehner.fritz@fh-swf.de
+ *   Organization:  FH Südwestfalen, Iserlohn
+ *
+ * =====================================================================================
+ */
+
+#include<stdio.h>
+#include<stdlib.h>
+#include<sys/types.h>
+#include<sys/stat.h>
+#include<fcntl.h>
+#include<stdlib.h>
+#include<sys/socket.h>
+#include<string.h>
+#include<netinet/in.h>
+#include<errno.h>
+#include<unistd.h>
+#include<arpa/inet.h>
+
+#define         SERVER_PORT  8888
+#define         BUFFER_SIZE  5120//5KB
+#define         FILE_NAME_MAXSIZE 200
+
+void my_err(const char *err_string,int line)
+{
+        fprintf(stderr,"line: %d ",line);
+        perror(err_string);
+        exit(1);
+}
+
+int main(int argc , char **argv)
+{
+        int i;
+        int connect_socket;//连接的套接字
+        struct sockaddr_in server_addr;
+        char buffer[BUFFER_SIZE];
+        int server_port;
+
+        memset(&server_addr,0,sizeof(struct sockaddr_in));
+        server_addr.sin_family=AF_INET;
+
+        //从命令行获取服务器端的端口和IP地址
+        for(i=1 ; i<argc ; i++){
+                if(strcmp("-p",argv[i]) == 0){
+                        server_port=atoi(argv[i+1]);
+                        if(server_port < 0 || server_port > 65535){
+                                printf("输入的服务器端口不正确！\n");
+                                exit(1);
+                        }else{
+                                server_addr.sin_port=htons(server_port);
+                        }
+                        continue;
+                }
+                if(strcmp("-a",argv[i]) == 0){
+                        if(inet_aton(argv[i+1],&server_addr.sin_addr)==0){
+                                printf("输入的服务器IP不正确！\n");
+                                exit(1);
+                        }
+                        continue;
+                }
+        }
+
+        //检测是否少输入了某项参数
+        if(server_addr.sin_port == 0 || server_addr.sin_addr.s_addr == 0){
+                printf("格式: [-p] [server_addr.sin_port] [-a] [server_IP]");
+                exit(1);
+        }
+        
+        //创建一个socket
+        connect_socket=socket(AF_INET,SOCK_STREAM,0);
+        if(connect_socket<0){
+                my_err("socket",__LINE__);
+        }
+
+        //向服务器端发送链接请求,连接成功后connect_socket代表了客户端与服务器端的一个socket连接
+        if(connect(connect_socket,(struct sockaddr*)&server_addr,sizeof(struct sockaddr))<0){
+                my_err("connect",__LINE__);
+        }
+
+        //输入文件名，并放入到缓冲区buffer中等待发送
+        char file_name[FILE_NAME_MAXSIZE];
+        bzero(file_name,FILE_NAME_MAXSIZE);//清零操作
+        printf("输入要下载的服务器端的文件名:");
+        scanf("%s",file_name);
+
+        bzero(buffer,FILE_NAME_MAXSIZE);        
+        strncpy(buffer,file_name,strlen(file_name)>BUFFER_SIZE ? BUFFER_SIZE : strlen(file_name));
+
+        //向服务器发送buffer中的数据,即文件名
+        if(send(connect_socket,buffer,BUFFER_SIZE,0)<0)
+        {
+                my_err("send",__LINE__);
+                exit(1);
+        }
+
+        //打开文件，准备写入
+        int fd;
+        if((fd=open("file_name",O_CREAT | O_EXCL,S_IRUSR | S_IWUSR))==-1){
+                my_err("open",__LINE__);
+                exit(1);
+        }
+
+        //从服务器接受数据到buffer中，每接收一段数据，便将其写入文件中，循环直到文件接收完并写完为止
+        bzero(buffer,BUFFER_SIZE);
+        int length=0;
+        while((length=recv(connect_socket,buffer,BUFFER_SIZE))>0){
+                if(write(fd,buffer,length)<length){
+                        printf("File:\t%s write failed\n",file_name);
+                        break;
+                }
+                bzero(buffer,BUFFER_SIZE);
+        }
+
+        //接收成功后，关闭文件，关闭socket
+        printf("Receeived file:%s from server IP successful!\n",file_name);
+        close(fd);
+        close(connect_socket);
+        return 0;
+}

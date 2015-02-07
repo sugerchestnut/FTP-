@@ -1,0 +1,119 @@
+/*
+ * =====================================================================================
+ *
+ *       Filename:  server.c
+ *
+ *    Description:  服务器端程序
+ *
+ *        Version:  1.0
+ *        Created:  2015年01月31日 12时40分04秒
+ *       Revision:  none
+ *       Compiler:  gcc
+ *
+ *         Author:  潘璐 (fgm), mehner.fritz@fh-swf.de
+ *   Organization:  FH Südwestfalen, Iserlohn
+ *
+ * =====================================================================================
+ */
+#include<stdio.h>
+#include<sys/types.h>
+#include<sys/stat.h>
+#include<fcntl.h>
+#include<stdlib.h>
+#include<sys/socket.h>
+#include<unistd.h>
+#include<netinet/in.h>
+#include<string.h>
+#include<arpa/inet.h>
+#include<errno.h>
+#include<time.h>
+
+
+#define         SERV_PORT       8888
+#define         LISTEN_QUEEN    20
+#define         BUFFER_SIZE     5120  //5KB
+#define         FILE_NAME_MAXSIZE 200
+
+void my_err(const char *err_string,int line)//错误处理函数
+{
+        fprintf(stderr,"line:%d",line);
+        perror(err_string);
+        exit(1);
+}
+
+int main()
+{
+        int                     server_socket,connect_socket;//服务器端创建的套接字和建立联接后的套接字
+        int                     optval;//设置套接字属性
+        struct sockaddr_in      client_addr,server_addr;
+        //char                    send_buf[BUFFER_SIZE];
+       // char                    recv_buf[BUFFER_SIZE];
+
+        server_socket=socket(AF_INET,SOCK_STREAM,0);//创建一个套接字
+        if(server_socket<0){
+                my_err("socket",__LINE__);
+        }
+
+        optval=1;//设置套接字，使之可以重新绑定端口
+        if(setsockopt(server_socket,SOL_SOCKET,SO_REUSEADDR,(void *)&optval,sizeof(int))<0){
+                my_err("setsockopt",__LINE__);
+        }
+
+        memset(&server_socket,0,sizeof(struct sockaddr_in));//初始化服务器端地址结构
+        server_addr.sin_family=AF_INET;
+        server_addr.sin_port=htons(SERV_PORT);
+        server_addr.sin_addr.s_addr=htonl(INADDR_ANY);//可以绑定到任何网络接口上
+
+        if(bind(server_socket,(struct sockaddr *)&server_addr,sizeof(struct sockaddr_in))<0){
+                //将套接字绑定到本地端口上
+                my_err("bind",__LINE__);
+        }
+
+        if(listen(server_socket,LISTEN_QUEEN)<0){//将套接字转换为监听套接字
+                my_err("listen",__LINE__);
+        }
+
+        //cli_len=sizeof(struct sockaddr_in);
+
+        while(1){//服务器端要一直运行
+                socklen_t client_length=sizeof(client_addr);//客户端套接字地址长度
+
+/* 接收连接请求，返回一个新的socket，这个新的socket用于同连接的客户端通信，accept函数会把连接到的客户端信息写入到client_addr中 */
+                connect_socket=accept(server_socket,(struct sockaddr*)&client_addr,&client_length);
+                if(connect_socket<0){
+                        my_err("accept",__LINE__);
+                }
+
+                char buffer[BUFFER_SIZE];//recv接收到的数据保存在缓冲区buffer中,文件名
+                bzero(buffer,BUFFER_SIZE);
+                if(recv(connect_socket,buffer,BUFFER_SIZE,0)<0){
+                        my_err("recv",__LINE__);
+                        break;
+                }
+                char file_name[FILE_NAME_MAXSIZE];//将buffer接收到的文件名转存到file_name中
+                bzero(file_name,FILE_NAME_MAXSIZE);
+                strncpy(file_name,buffer,strlen(buffer)>FILE_NAME_MAXSIZE?FILE_NAME_MAXSIZE:strlen(buffer));
+                printf("\n%s\n",file_name);
+                
+                /* 打开文件并且读取数据 */
+                int fd;
+                if((fd=open("file_name", O_CREAT | O_EXCL, S_IRUSR | S_IWUSR))==-1){
+                        my_err("open",__LINE__);
+                        break;
+                }else{
+                        bzero(buffer,BUFFER_SIZE);
+                        int length=0;
+                        while((length=read(fd,buffer,BUFFER_SIZE))>0){//读取数据
+                                if(send(connect_socket,buffer,length,0)<0){//发送数据
+                                        my_err("send",__LINE__);
+                                        break;
+                                }
+                                bzero(buffer,BUFFER_SIZE);//每传输一次需要将buffer清零
+                        }
+                        close(fd);//文件传输完毕，关闭文件
+                        printf("Send file:%s successful!\n",file_name);
+                }
+                close(connect_socket);
+        }
+        close(server_socket);//关闭监听的套接字
+}

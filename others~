@@ -1,0 +1,383 @@
+server:
+
+#include<stdio.h>
+#include<sys/types.h>
+#include<sys/stat.h>
+#include<fcntl.h>
+#include<stdlib.h>
+#include<sys/socket.h>
+#include<unistd.h>
+#include<netinet/in.h>
+#include<string.h>
+#include<arpa/inet.h>
+#include<errno.h>
+#include<time.h>
+
+
+#define         SERV_PORT       	1111
+#define         LISTEN_QUEEN    	20
+#define         BUFFER_SIZE     	1024  //1KB
+#define         FILE_NAME_MAXSIZE 	200
+
+void my_err(const char *err_string,int line)//错误处理函数
+{
+        fprintf(stderr,"line:%d",line);
+        perror(err_string);
+        exit(1);
+}
+
+void do_get(int connect_socket){
+	                   //bzero(choice,sizeof(choice));
+                		char buffer[BUFFER_SIZE];//recv接收到的数据保存在缓冲区buffer中,文件名
+                		bzero(buffer,BUFFER_SIZE);
+                		if(recv(connect_socket,buffer,BUFFER_SIZE,0)<0){
+                        		my_err("recv",__LINE__);
+                        		exit(1);
+                		}
+                		
+                		char file_name[FILE_NAME_MAXSIZE];//将buffer接收到的文件名转存到file_name中
+                		bzero(file_name,FILE_NAME_MAXSIZE);
+                		strncpy(file_name,buffer,strlen(buffer) > FILE_NAME_MAXSIZE ? FILE_NAME_MAXSIZE : strlen(buffer));
+                		
+                		printf("\n %s \n",file_name);//输出客户端从服务器端下载的文件名
+                
+                		/* 打开文件并且读取数据 */
+                		int fd;
+                		if((fd=open(file_name,O_RDWR))==-1){//打开文件失败
+                        		my_err("open",__LINE__);
+                        		exit(1);
+               			}else{ 								//打开文件成功
+                        		bzero(buffer,BUFFER_SIZE);  //缓冲区清零
+                        		int length=0;
+                        		while((length=read(fd,buffer,BUFFER_SIZE))>0){//读取数据
+                                		if(send(connect_socket,buffer,length,0)<0){//发送数据
+                                        		my_err("send",__LINE__);
+                                        		break;
+                                		}
+                                		bzero(buffer,BUFFER_SIZE);//每传输一次需要将buffer清零
+                        		}
+                        		close(fd);//文件传输完毕，关闭文件
+                        		printf("Send file:%s successful!\n",file_name);
+                		}
+                		
+                		
+}
+
+void do_put(int connect_socket){
+	               //bzero(choice,sizeof(choice));
+						char buffer[BUFFER_SIZE];
+        				bzero(buffer,BUFFER_SIZE);  //缓冲区清零  
+        				if(recv(connect_socket,buffer,BUFFER_SIZE,0)<0){//接收到文件名，并放入到缓冲区buffer中
+                        		my_err("recv",__LINE__);
+                        		exit(1);
+                		}    
+                		
+                		printf("%s\n\n\n",buffer);
+        			//strncpy(buffer,file_name,strlen(file_name)>BUFFER_SIZE ? BUFFER_SIZE : strlen(file_name));
+        	
+        		//向服务器发送buffer中的数据,即文件名
+        		//if(send(connect_socket,buffer,BUFFER_SIZE,0)<0)
+        		//{
+                		//my_err("send file_name",__LINE__);
+                		//exit(1);
+        		//}								
+                		char file_name[FILE_NAME_MAXSIZE];
+        				bzero(file_name,FILE_NAME_MAXSIZE);//清零操作
+                		strncpy(file_name,buffer,strlen(buffer)>FILE_NAME_MAXSIZE ? FILE_NAME_MAXSIZE : strlen(buffer));
+                		//将buffer中的文件名拷贝到file_name中
+                		printf("%s\n\n",file_name);
+        				//打开文件，准备写入服务器端文件夹中
+        				int fd;
+        				int fd1;
+        				if(fd1=open(file_name,O_RDWR)>0)
+        				{
+                				printf("服务器端该文件已存在，无法上传!\n");
+                				exit(1);
+                				close(fd1);
+        				}
+        			//if((fd=open(file_name,O_CREAT | O_EXCL,S_IRUSR | S_IWUSR))==-1){
+          				if((fd=creat(file_name,S_IRWXU))==-1){//以用户可读可写的方式创建
+                				my_err("creat",__LINE__);
+               					exit(1);
+       	  				}else{
+       	  					printf("creat file successful\n");
+       	  				}
+
+        				//从客户端接受数据到buffer中，每接收一段数据，便将其写入文件中，循环直到文件接收完并写完为止
+        				bzero(buffer,BUFFER_SIZE);
+        				int length=0;
+       					while((length=recv(connect_socket,buffer,BUFFER_SIZE,MSG_WAITALL))>0){
+       								printf("aaaaaaaa");
+       								printf("%s\n\n\n",buffer);
+        							if((write(fd,buffer,length))<length){
+        								printf("\n%s\n",buffer);
+                    					printf("File:\t%s write failed\n",file_name);
+                    					break;
+                    				}else{
+                    					printf("%s\n\n\n",buffer);
+                    					printf("put file successful!\n");
+                    				}
+                				bzero(buffer,BUFFER_SIZE);
+        				}
+        			
+}
+
+int main()
+{
+        int                     server_socket,connect_socket;//服务器端创建的套接字和建立联接后的套接字
+        int                     optval;//设置套接字属性
+        struct sockaddr_in      client_addr,server_addr;
+        //char                    send_buf[BUFFER_SIZE];
+       // char                    recv_buf[BUFFER_SIZE];
+		char 					choice[10];
+		
+        server_socket=socket(AF_INET,SOCK_STREAM,0);//创建一个套接字
+        if(server_socket<0){
+                my_err("socket",__LINE__);
+        }
+
+        optval=1;//设置套接字，使之可以重新绑定端口
+        if(setsockopt(server_socket,SOL_SOCKET,SO_REUSEADDR,(void *)&optval,sizeof(int))<0){
+                my_err("setsockopt",__LINE__);
+        }
+
+        memset(&server_addr,0,sizeof(struct sockaddr_in));//初始化服务器端地址结构
+        server_addr.sin_family=AF_INET;
+        server_addr.sin_port=htons(SERV_PORT);
+        server_addr.sin_addr.s_addr=htonl(INADDR_ANY);//可以绑定到任何网络接口上
+
+        if(bind(server_socket,(struct sockaddr *)&server_addr,sizeof(struct sockaddr_in))<0){
+                //将套接字绑定到本地端口上
+                my_err("bind",__LINE__);
+        }
+
+        if(listen(server_socket,LISTEN_QUEEN)<0){//将套接字转换为监听套接字
+                my_err("listen",__LINE__);
+        }
+
+        //cli_len=sizeof(struct sockaddr_in);
+	
+		
+		
+        while(1){//服务器端要一直运行
+                	socklen_t  client_length=sizeof(client_addr);//客户端套接字地址长度
+
+	/* 接收连接请求，返回一个新的socket，这个新的socket用于同连接的客户端通信，accept函数会把连接到的客户端信息写入到client_addr中 */
+                	connect_socket=accept(server_socket,(struct sockaddr*) & client_addr, & client_length);
+                	
+                	if(connect_socket<0){
+                        	my_err(" accept",__LINE__);
+                        	exit(1);
+                	}
+                	
+                	if(recv(connect_socket,choice,sizeof(choice),0)<0){
+						my_err("receive choice",__LINE__);
+						exit(1);
+					}
+				
+					if((strcmp(choice,"get"))==0)
+					{
+						do_get(connect_socket);
+						
+        			}else if((strcmp(choice,"put"))==0){
+        			
+        				do_put(connect_socket);	
+        			}
+        			close(connect_socket);
+        			bzero(choice,sizeof(choice));
+        
+        }
+        close(server_socket);//关闭监听的套接字
+}
+
+client:
+
+#include<stdio.h>
+#include<stdlib.h>
+#include<sys/types.h>
+#include<sys/stat.h>
+#include<fcntl.h>
+#include<stdlib.h>
+#include<sys/socket.h>
+#include<string.h>
+#include<netinet/in.h>
+#include<errno.h>
+#include<unistd.h>
+#include<arpa/inet.h>
+
+#define         SERVER_PORT  1111
+#define         BUFFER_SIZE  1024//1KB
+#define         FILE_NAME_MAXSIZE 200
+
+void my_err(const char *err_string,int line)
+{
+        fprintf(stderr,"line: %d ",line);
+        perror(err_string);
+        exit(1);
+}
+
+void do_get(int connect_socket)
+{
+		
+      //输入文件名，并放入到缓冲区buffer中等待发送
+        char file_name[FILE_NAME_MAXSIZE];
+        bzero(file_name,FILE_NAME_MAXSIZE);//清零操作
+        printf("输入要下载的服务器端的文件名:");
+        scanf("%s",file_name);
+        
+		char buffer[BUFFER_SIZE];
+        bzero(buffer,FILE_NAME_MAXSIZE);        
+        strncpy(buffer,file_name,strlen(file_name)>BUFFER_SIZE ? BUFFER_SIZE : strlen(file_name));
+        	
+        //向服务器发送buffer中的数据,即文件名
+        if(send(connect_socket,buffer,BUFFER_SIZE,0)<0)
+        {
+                my_err("send file_name",__LINE__);
+                exit(1);
+        }
+
+        //打开文件，准备写入
+        int fd;
+        int fd1;
+        if(fd1=open(file_name,O_RDWR)>0)
+        {
+                printf("该文件已存在，不需要下载\n");
+                exit(1);
+        }
+        //if((fd=open(file_name,O_CREAT | O_EXCL,S_IRUSR | S_IWUSR))==-1){
+          if((fd=creat(file_name,S_IRWXU))==-1){
+                my_err("creat",__LINE__);
+               	exit(1);
+       	  }
+
+        //从服务器接受数据到buffer中，每接收一段数据，便将其写入文件中，循环直到文件接收完并写完为止
+        bzero(buffer,BUFFER_SIZE);
+        int length=0;
+       	while((length=recv(connect_socket,buffer,BUFFER_SIZE,0))>0){
+        			if((write(fd,buffer,length))<length){
+                    printf("File:\t%s write failed\n",file_name);
+                    break;
+                    }
+                bzero(buffer,BUFFER_SIZE);
+        }
+
+        //接收成功后，关闭文件，关闭socket
+        printf("Receeived file:%s from server IP successful!\n",file_name);
+        close(fd);
+        close(connect_socket);
+        //return 0;
+}
+
+void do_put(int connect_socket)
+{
+		char file_name[FILE_NAME_MAXSIZE];//文件名
+		bzero(file_name,FILE_NAME_MAXSIZE);
+		printf("输入要上传的客户端的文件名:");
+        scanf("%s",file_name);
+        
+        char buffer[BUFFER_SIZE];//缓冲区
+        bzero(buffer,BUFFER_SIZE);        
+        strncpy(buffer,file_name,strlen(file_name)>BUFFER_SIZE ? BUFFER_SIZE : strlen(file_name));//将file_name里面的文件名拷贝到buffer中
+               
+        //向服务器发送buffer中的数据,即文件名
+        if(send(connect_socket,buffer,BUFFER_SIZE,0)<0)
+        {
+                my_err("send file_name",__LINE__);
+                exit(1);
+        }
+        
+        int fd;
+        if(fd=open(file_name,O_RDONLY)<0)//以只读的方式打开文件
+        {
+                printf("该文件不存在，无法上传！\n");
+                exit(1);
+        }else{
+        		printf("文件存在，可以上传!\n");
+        		
+                int length=0;
+                
+                //length=read(fd,buffer,BUFFER_SIZE);
+                //printf("%s\n\n\n",buffer);
+                //length=0;
+                bzero(buffer,BUFFER_SIZE);
+                while((length=read(fd,buffer,BUFFER_SIZE))>0){//从文件中读取数据
+                		printf("aaaaaaaa");
+                		printf("%s\n\n\n",buffer);
+                		if((send(connect_socket,buffer,length,0))<0){//发送数据
+                      		my_err("send",__LINE__);
+                      		break;
+                		}else{
+                			printf("%s\n\n\n",buffer);
+                		}
+                	bzero(buffer,BUFFER_SIZE);//每传输一次需要将buffer清零
+       			}
+       			close(fd);//文件传输完毕，关闭文件
+                printf("Send file:%s successful!\n",file_name);
+        }
+        close(connect_socket);//关闭连接的套接字
+}
+
+int main(int argc , char **argv)
+{
+        int i;
+        int connect_socket;//连接的套接字
+        struct sockaddr_in server_addr;
+        
+        int server_port;
+
+        memset(&server_addr,0,sizeof(struct sockaddr_in));
+        server_addr.sin_family=AF_INET;
+
+        //从命令行获取服务器端的端口和IP地址
+        for(i=1 ; i<argc ; i++){
+                if(strcmp("-p",argv[i]) == 0){
+                        server_port=atoi(argv[i+1]);
+                        if(server_port < 0 || server_port > 65535){
+                                printf("输入的服务器端口不正确！\n");
+                                exit(1);
+                        }else{
+                                server_addr.sin_port=htons(server_port);
+                        }
+                        continue;
+                }
+                if(strcmp("-a",argv[i]) == 0){
+                        if(inet_aton(argv[i+1],&server_addr.sin_addr)==0){
+                                printf("输入的服务器IP不正确！\n");
+                                exit(1);
+                        }
+                        continue;
+                }
+        }
+
+        //检测是否少输入了某项参数
+        if(server_addr.sin_port == 0 || server_addr.sin_addr.s_addr == 0){
+                printf("格式: [-p] [server_addr.sin_port] [-a] [server_IP]");
+                exit(1);
+        }
+        
+        //创建一个socket
+        connect_socket=socket(AF_INET,SOCK_STREAM,0);
+        if(connect_socket<0){
+                my_err("socket",__LINE__);
+        }
+
+        //向服务器端发送链接请求,连接成功后connect_socket代表了客户端与服务器端的一个socket连接
+        if(connect(connect_socket,(struct sockaddr*)&server_addr,sizeof(struct sockaddr))<0){
+                my_err("connect",__LINE__);
+        }
+
+        char choice[10];
+        printf("请选择:put or get:");
+        scanf("%s",choice);
+        
+        if(send(connect_socket,choice,sizeof(choice),0)<0){
+                my_err("send choice",__LINE__);
+                exit(1);
+        }
+        
+        if((strcmp(choice,"get"))==0){
+        	   do_get(connect_socket);
+		}else if((strcmp(choice,"put"))==0){
+			   do_put(connect_socket);		
+		}
+}
